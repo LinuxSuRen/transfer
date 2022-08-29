@@ -22,82 +22,106 @@ func NewRoot() (cmd *cobra.Command) {
 	return
 }
 
-func newSendCmd() (cmd *cobra.Command) {
-	cmd = &cobra.Command{
-		Use: "send",
-		RunE: func(cmd *cobra.Command, args []string) (err error) {
-			beginTime := time.Now()
-			if len(args) <= 0 {
-				fmt.Println("filename is required")
-				return
-			}
+type sendOption struct {
+	ip string
+}
 
-			ip := "0.0.0.0"
-			if len(args) >= 2 {
-				ip = args[1]
-			}
+func (o *sendOption) preRunE(cmd *cobra.Command, args []string) (err error) {
+	if len(args) >= 2 {
+		o.ip = args[1]
+		return
+	}
 
-			file := args[0]
+	listener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 9981})
+	if err != nil {
+		return err
+	}
+	data := make([]byte, 1024)
+	_, remoteAddr, err := listener.ReadFromUDP(data)
+	if err != nil {
+		return err
+	}
+	o.ip = remoteAddr.IP.String()
+	cmd.Println("found target", o.ip)
+	return
+}
 
-			var data []byte
-			if data, err = os.ReadFile(file); err != nil {
-				return
-			}
+func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
+	beginTime := time.Now()
+	if len(args) <= 0 {
+		fmt.Println("filename is required")
+		return
+	}
 
-			fmt.Println("file length", len(data))
+	file := args[0]
 
-			chrunk := 60000
-			buffer := make([][]byte, 0)
-			index := 0
-			for i := 0; i < len(data); index++ {
-				j := i + chrunk
-				if j > len(data) {
-					j = len(data)
-				}
-				buffer = append(buffer, data[i:j])
-				i = j
-			}
+	var data []byte
+	if data, err = os.ReadFile(file); err != nil {
+		return
+	}
 
-			var conn net.Conn
-			if conn, err = net.Dial("udp", fmt.Sprintf("%s:3000", ip)); err != nil {
-				return
-			}
+	fmt.Println("file length", len(data))
 
-			for i := 0; i < len(buffer); i++ {
-				// length,filename,count,index
+	chrunk := 60000
+	buffer := make([][]byte, 0)
+	index := 0
+	for i := 0; i < len(data); index++ {
+		j := i + chrunk
+		if j > len(data) {
+			j = len(data)
+		}
+		buffer = append(buffer, data[i:j])
+		i = j
+	}
+
+	var conn net.Conn
+	if conn, err = net.Dial("udp", fmt.Sprintf("%s:3000", o.ip)); err != nil {
+		return
+	}
+
+	for i := 0; i < len(buffer); i++ {
+		// length,filename,count,index
+		header := fmt.Sprintf("%s%s%s%s",
+			fillContainerWithNumber(len(data), 20),
+			fillContainer(file, 100),
+			fillContainerWithNumber(len(buffer), 10),
+			fillContainerWithNumber(i, 10))
+		conn.Write(append([]byte(header), buffer[i]...))
+
+		if i == 0 {
+			time.Sleep(time.Second)
+		}
+	}
+
+	checking := true
+	for checking {
+		if index, ok := waitingMissing(conn); ok {
+			if index == -1 {
+				checking = false
+			} else {
 				header := fmt.Sprintf("%s%s%s%s",
 					fillContainerWithNumber(len(data), 20),
 					fillContainer(file, 100),
 					fillContainerWithNumber(len(buffer), 10),
-					fillContainerWithNumber(i, 10))
-				conn.Write(append([]byte(header), buffer[i]...))
-
-				if i == 0 {
-					time.Sleep(time.Second)
-				}
+					fillContainerWithNumber(index, 10))
+				conn.Write(append([]byte(header), buffer[index]...))
 			}
+		}
+	}
+	endTime := time.Now()
+	fmt.Println("sent over with", endTime.Sub(beginTime).Seconds())
 
-			checking := true
-			for checking {
-				if index, ok := waitingMissing(conn); ok {
-					if index == -1 {
-						checking = false
-					} else {
-						header := fmt.Sprintf("%s%s%s%s",
-							fillContainerWithNumber(len(data), 20),
-							fillContainer(file, 100),
-							fillContainerWithNumber(len(buffer), 10),
-							fillContainerWithNumber(index, 10))
-						conn.Write(append([]byte(header), buffer[index]...))
-					}
-				}
-			}
-			endTime := time.Now()
-			fmt.Println("sent over with", endTime.Sub(beginTime).Seconds())
+	conn.Close()
+	return
+}
 
-			conn.Close()
-			return
-		},
+func newSendCmd() (cmd *cobra.Command) {
+	opt := &sendOption{}
+
+	cmd = &cobra.Command{
+		Use:     "send",
+		PreRunE: opt.preRunE,
+		RunE:    opt.runE,
 	}
 	return
 }
@@ -184,10 +208,14 @@ func newWaitCmd() (cmd *cobra.Command) {
 					case <-ctx.Done():
 						return
 					case <-time.After(3 * time.Second):
-						if conn, err := net.Dial("udp", "0.0.0.0:4000"); err == nil {
-							_, _ = conn.Write([]byte(fmt.Sprintf("trasfer 0.0.0.0:3000-%d", time.Now().Second())))
-							conn.Close()
+						ip := net.ParseIP("192.168.1.255")
+						srcAddr := &net.UDPAddr{IP: net.IPv4zero, Port: 0}
+						dstAddr := &net.UDPAddr{IP: ip, Port: 9981}
+						conn, err := net.ListenUDP("udp", srcAddr)
+						if err != nil {
+							return
 						}
+						conn.WriteToUDP([]byte("hello"), dstAddr)
 					}
 				}
 			}(ctx)
@@ -202,87 +230,84 @@ func newWaitCmd() (cmd *cobra.Command) {
 			defer conn.Close()
 
 			fmt.Printf("server listening %s\n", conn.LocalAddr().String())
-			for {
 
-				f, err := os.CreateTemp(".", "tmp")
-				if err != nil {
-					panic(err)
-				}
-
-				header, err := readHeader(conn)
-				if err != nil {
-					fmt.Println(err)
-					continue
-				}
-				fmt.Println("start to receive data from", header.remote)
-
-				buffer := make([][]byte, header.count)
-				buffer[header.index] = header.data
-
-				wg := sync.WaitGroup{}
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-
-					checking := true
-					for checking {
-						done := true
-						for i := 0; i < header.count; i++ {
-							if len(buffer[i]) == 0 {
-								done = false
-
-								header, err := readHeader(conn)
-								if err == nil {
-									buffer[header.index] = header.data
-								}
-							}
-						}
-						if done {
-							checking = false
-						}
-					}
-				}()
-
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-
-					checking := true
-					for checking {
-						done := true
-						for i := 0; i < header.count; i++ {
-							if len(buffer[i]) == 0 {
-								done = false
-								requestMissing(conn, i, header.remote)
-								time.Sleep(time.Millisecond * 10)
-								break
-							}
-						}
-
-						if done {
-							requestDone(conn, header.remote)
-							checking = false
-						}
-					}
-					fmt.Println("done with checking")
-				}()
-
-				wg.Wait()
-
-				for i := 0; i < header.count; i++ {
-					if len(buffer[i]) == 0 {
-						fmt.Println("not received", i)
-					}
-				}
-
-				for i := range buffer {
-					f.Write(buffer[i])
-				}
-				f.Close()
-
-				fmt.Println("writed to file", f.Name())
+			f, err := os.CreateTemp(".", "tmp")
+			if err != nil {
+				panic(err)
 			}
 
+			header, err := readHeader(conn)
+			if err != nil {
+				fmt.Println(err)
+				return err
+			}
+			fmt.Println("start to receive data from", header.remote)
+
+			buffer := make([][]byte, header.count)
+			buffer[header.index] = header.data
+
+			wg := sync.WaitGroup{}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				checking := true
+				for checking {
+					done := true
+					for i := 0; i < header.count; i++ {
+						if len(buffer[i]) == 0 {
+							done = false
+
+							header, err := readHeader(conn)
+							if err == nil {
+								buffer[header.index] = header.data
+							}
+						}
+					}
+					if done {
+						checking = false
+					}
+				}
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				checking := true
+				for checking {
+					done := true
+					for i := 0; i < header.count; i++ {
+						if len(buffer[i]) == 0 {
+							done = false
+							requestMissing(conn, i, header.remote)
+							time.Sleep(time.Millisecond * 10)
+							break
+						}
+					}
+
+					if done {
+						requestDone(conn, header.remote)
+						checking = false
+					}
+				}
+				fmt.Println("done with checking")
+			}()
+
+			wg.Wait()
+
+			for i := 0; i < header.count; i++ {
+				if len(buffer[i]) == 0 {
+					fmt.Println("not received", i)
+				}
+			}
+
+			for i := range buffer {
+				f.Write(buffer[i])
+			}
+			f.Close()
+
+			fmt.Println("writed to file", f.Name())
 			return nil
 		},
 	}
