@@ -167,20 +167,6 @@ func checkMissing(message []byte) (index int, ok bool) {
 	return
 }
 
-func confirmOK(conn *net.UDPConn) (ok bool) {
-	message := make([]byte, 100)
-
-	if rlen, _, err := conn.ReadFromUDP(message[:]); err == nil {
-		ok = string(message[:rlen]) == "confirmed"
-	}
-	return
-}
-
-func sendConfirm(conn *net.UDPConn) (err error) {
-	_, err = conn.Write([]byte("confirmed"))
-	return
-}
-
 func fillContainerWithNumber(num, size int) string {
 	return fillContainer(fmt.Sprintf("%d", num), size)
 }
@@ -346,22 +332,6 @@ func readHeader(conn *net.UDPConn) (header dataHeader, err error) {
 		}
 
 		header.data = message[140:rlen]
-	}
-	return
-}
-
-func writeFile(header dataHeader, data []byte, rlen int) (err error) {
-	var f *os.File
-	f, err = os.OpenFile(header.filename, os.O_WRONLY|os.O_CREATE, 0666)
-	if err != nil {
-		return
-	}
-	_, err = f.Write(data[:rlen])
-	if err != nil {
-		fmt.Println("failed to write", err)
-	} else {
-		f.Close()
-		fmt.Println("write to file", header.filename)
 	}
 	return
 }

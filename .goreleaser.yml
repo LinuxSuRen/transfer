@@ -1,0 +1,58 @@
+# Official documentation at http://goreleaser.com
+project_name: transfer
+builds:
+  - env:
+      - CGO_ENABLED=0
+    binary: transfer
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - 7
+      - 6
+    goos:
+      - windows
+      - linux
+      - darwin
+    ignore:
+      - goos: windows
+        goarch: arm
+      - goos: windows
+        goarch: arm64
+      - goos: darwin
+        goarch: arm
+    hooks:
+      post:
+        - upx "{{ .Path }}"
+    ldflags:
+      - -X github.com/linuxsuren/cobra-extension/version.version={{.Version}}
+      - -X github.com/linuxsuren/cobra-extension/version.commit={{.ShortCommit}}
+      - -X github.com/linuxsuren/cobra-extension/version.date={{.Date}}
+      - -w
+      - -s
+dist: release
+archives:
+  - name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}{{ .Arm }}"
+    replacements:
+      darwin: darwin
+      linux: linux
+      windows: windows
+      amd64: amd64
+      arm64: arm64
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ .Tag }}-next-{{.ShortCommit}}"
+changelog:
+  skip: true
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
