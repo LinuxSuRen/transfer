@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,38 +59,67 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 
 	file := args[0]
 
-	var data []byte
-	if data, err = os.ReadFile(file); err != nil {
+	var f *os.File
+	if f, err = os.Open(file); err != nil {
 		return
 	}
 
-	fmt.Println("file length", len(data))
+	var fi os.FileInfo
+	if fi, err = os.Stat(file); err != nil {
+		return
+	}
+
+	fileSize := fi.Size()
+	fmt.Println("file length", fileSize)
 
 	chrunk := 60000
-	buffer := make([][]byte, 0)
+	if runtime.GOOS == "darwin" {
+		chrunk = 500 // default value on darwin is 9216
+	}
+	fmt.Println("sending chrunk size", chrunk)
+
 	index := 0
-	for i := 0; i < len(data); index++ {
-		j := i + chrunk
-		if j > len(data) {
-			j = len(data)
+	bufferCount := 0
+	var i int64
+	var j int64
+	for i = 0; i < fileSize; index++ {
+		j = i + int64(chrunk)
+		if j > fileSize {
+			j = fileSize
 		}
-		buffer = append(buffer, data[i:j])
+		bufferCount = bufferCount + 1
 		i = j
 	}
 
+	cmd.Println("connect to", o.ip)
 	var conn net.Conn
 	if conn, err = net.Dial("udp", fmt.Sprintf("%s:3000", o.ip)); err != nil {
 		return
 	}
 
-	for i := 0; i < len(buffer); i++ {
+	cmd.Println("start to send data")
+	reader := bufio.NewReader(f)
+	for i := 0; i < bufferCount; i++ {
 		// length,filename,count,index
-		header := fmt.Sprintf("%s%s%s%s",
-			fillContainerWithNumber(len(data), 20),
-			fillContainer(file, 100),
-			fillContainerWithNumber(len(buffer), 10),
+		header := fmt.Sprintf("%s%s%s%s%s",
+			fillContainerWithNumber(int(fileSize), 20),
+			fillContainer(path.Base(f.Name()), 100),
+			fillContainerWithNumber(chrunk, 10),
+			fillContainerWithNumber(bufferCount, 10),
 			fillContainerWithNumber(i, 10))
-		conn.Write(append([]byte(header), buffer[i]...))
+
+		buf := make([]byte, chrunk)
+		var n int
+		if n, err = reader.Read(buf); err == io.EOF {
+			break
+		} else if err != nil {
+			return
+		}
+
+		retry(10, func() error {
+			_, err := conn.Write(append([]byte(header), buf[:n]...))
+			return err
+		})
 
 		if i == 0 {
 			time.Sleep(time.Second)
@@ -99,12 +132,25 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 			if index == -1 {
 				checking = false
 			} else {
-				header := fmt.Sprintf("%s%s%s%s",
-					fillContainerWithNumber(len(data), 20),
-					fillContainer(file, 100),
-					fillContainerWithNumber(len(buffer), 10),
+				f.Seek(int64(index*chrunk), 0)
+
+				header := fmt.Sprintf("%s%s%s%s%s",
+					fillContainerWithNumber(bufferCount, 20),
+					fillContainer(path.Base(f.Name()), 100),
+					fillContainerWithNumber(chrunk, 10),
+					fillContainerWithNumber(bufferCount, 10),
 					fillContainerWithNumber(index, 10))
-				conn.Write(append([]byte(header), buffer[index]...))
+
+				buf := make([]byte, chrunk)
+				var n int
+				if n, err = reader.Read(buf); err != nil {
+					return
+				}
+
+				retry(10, func() error {
+					_, err := conn.Write(append([]byte(header), buf[:n]...))
+					return err
+				})
 			}
 		}
 	}
@@ -112,6 +158,20 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 	fmt.Println("sent over with", endTime.Sub(beginTime).Seconds())
 
 	conn.Close()
+	return
+}
+
+func retry(count int, callback func() error) (err error) {
+	if callback == nil {
+		return
+	}
+
+	for i := 0; i < count; i++ {
+		if err = callback(); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	return
 }
 
@@ -217,11 +277,6 @@ func newWaitCmd() (cmd *cobra.Command) {
 
 			fmt.Printf("server listening %s\n", conn.LocalAddr().String())
 
-			f, err := os.CreateTemp(".", "tmp")
-			if err != nil {
-				panic(err)
-			}
-
 			header, err := readHeader(conn)
 			if err != nil {
 				fmt.Println(err)
@@ -229,8 +284,19 @@ func newWaitCmd() (cmd *cobra.Command) {
 			}
 			fmt.Println("start to receive data from", header.remote)
 
-			buffer := make([][]byte, header.count)
-			buffer[header.index] = header.data
+			f, err := os.OpenFile(header.filename, os.O_WRONLY|os.O_CREATE, 0640)
+			if err != nil {
+				panic(err)
+			}
+
+			if _, err = f.Write(make([]byte, header.length)); err != nil {
+				err = fmt.Errorf("failed to init file, %v", err)
+				return err
+			}
+
+			buffer := make([]byte, header.count)
+			buffer[header.index] = 1
+			f.WriteAt(header.data, int64(header.chrunk*header.index))
 
 			wg := sync.WaitGroup{}
 			wg.Add(1)
@@ -241,12 +307,15 @@ func newWaitCmd() (cmd *cobra.Command) {
 				for checking {
 					done := true
 					for i := 0; i < header.count; i++ {
-						if len(buffer[i]) == 0 {
+						if buffer[i] != 1 {
 							done = false
 
 							header, err := readHeader(conn)
 							if err == nil {
-								buffer[header.index] = header.data
+								_, err = f.WriteAt(header.data, int64(header.chrunk*header.index))
+								if err == nil {
+									buffer[header.index] = 1
+								}
 							}
 						}
 					}
@@ -264,7 +333,7 @@ func newWaitCmd() (cmd *cobra.Command) {
 				for checking {
 					done := true
 					for i := 0; i < header.count; i++ {
-						if len(buffer[i]) == 0 {
+						if buffer[i] != 1 {
 							done = false
 							requestMissing(conn, i, header.remote)
 							time.Sleep(time.Millisecond * 10)
@@ -281,19 +350,9 @@ func newWaitCmd() (cmd *cobra.Command) {
 			}()
 
 			wg.Wait()
-
-			for i := 0; i < header.count; i++ {
-				if len(buffer[i]) == 0 {
-					fmt.Println("not received", i)
-				}
-			}
-
-			for i := range buffer {
-				f.Write(buffer[i])
-			}
 			f.Close()
 
-			fmt.Println("writed to file", f.Name())
+			fmt.Println("wrote to file", f.Name())
 			return nil
 		},
 	}
@@ -303,6 +362,7 @@ func newWaitCmd() (cmd *cobra.Command) {
 type dataHeader struct {
 	length   int    // 20 bit
 	filename string // 100 bit
+	chrunk   int    // 10 bit
 	count    int    // 10 bit
 	index    int    // 10 bit
 	data     []byte
@@ -315,7 +375,7 @@ func readHeader(conn *net.UDPConn) (header dataHeader, err error) {
 	var rlen int
 	rlen, header.remote, err = conn.ReadFromUDP(message[:])
 	if err == nil {
-		if rlen <= 140 {
+		if rlen <= 150 {
 			err = fmt.Errorf("invalid header format")
 			return
 		}
@@ -324,14 +384,17 @@ func readHeader(conn *net.UDPConn) (header dataHeader, err error) {
 			return
 		}
 		header.filename = strings.TrimSpace(string(message[20:120]))
-		if header.count, err = strconv.Atoi(strings.TrimSpace(string(message[120:130]))); err != nil {
+		if header.chrunk, err = strconv.Atoi(strings.TrimSpace(string(message[120:130]))); err != nil {
 			return
 		}
-		if header.index, err = strconv.Atoi(strings.TrimSpace(string(message[130:140]))); err != nil {
+		if header.count, err = strconv.Atoi(strings.TrimSpace(string(message[130:140]))); err != nil {
+			return
+		}
+		if header.index, err = strconv.Atoi(strings.TrimSpace(string(message[140:150]))); err != nil {
 			return
 		}
 
-		header.data = message[140:rlen]
+		header.data = message[150:rlen]
 	}
 	return
 }

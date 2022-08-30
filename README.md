@@ -13,3 +13,6 @@ send the data:
 ```shell
 transfer send targetFile [ip]
 ```
+
+## Limitations
+* Not stable when sending data from MacOS
