@@ -8,6 +8,8 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -101,9 +103,6 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 			_, err := conn.Write(builder.CreateHeader(i, buf[:n]))
 			return err
 		})
-		if err != nil {
-			fmt.Println(err)
-		}
 
 		if i == 0 {
 			// give more time to init file for the first package
@@ -173,5 +172,42 @@ func send(f *os.File, reader *bufio.Reader, conn net.Conn, index, chunk int, bui
 		_, err := conn.Write(builder.CreateHeader(index, buf[:n]))
 		return err
 	})
+	return
+}
+
+// waitingMissing read data, returns the missing index.
+// Consider it has finished if the index is -1.
+func waitingMissing(conn net.Conn) (index int, ok bool, err error) {
+	// format: miss0000000012, the index is 12
+	message := make([]byte, 14)
+
+	var rlen int
+	if err = conn.SetReadDeadline(time.Now().Add(time.Second * 3)); err != nil {
+		return
+	}
+
+	if rlen, err = conn.Read(message[:]); err == nil && rlen == 14 {
+		index, ok = checkMissing(message)
+	}
+	return
+}
+
+func checkMissing(message []byte) (index int, ok bool) {
+	var err error
+
+	if strings.HasPrefix(string(message), "miss") {
+		msg := strings.TrimSpace(strings.TrimPrefix(string(message), "miss"))
+		if index, err = strconv.Atoi(msg); err == nil {
+			ok = true
+		}
+	} else if strings.HasPrefix(string(message), "done") {
+		index = -1
+		ok = true
+	}
+	return
+}
+
+func requestMissing(conn *net.UDPConn, index int, remote *net.UDPAddr) (err error) {
+	_, err = conn.WriteTo([]byte("miss"+fillContainerWithNumber(index, 10)), remote)
 	return
 }

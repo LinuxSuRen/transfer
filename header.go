@@ -77,7 +77,7 @@ func (h *headerBuilder) Build() (err error) {
 
 	switch runtime.GOOS {
 	case "darwin":
-		h.chunk = 500 // default value on darwin is 9216
+		h.chunk = 9000 // default value on darwin is 9216
 	default:
 		h.chunk = 60000
 	}
