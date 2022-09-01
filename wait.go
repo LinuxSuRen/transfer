@@ -162,6 +162,15 @@ func (o *waitOption) runE(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func requestDone(conn *net.UDPConn, remote *net.UDPAddr) (err error) {
+	for i := 0; i < 3; i++ {
+		_, err = conn.WriteTo([]byte("done"+fillContainerWithNumber(0, 10)), remote)
+
+		time.Sleep(time.Second)
+	}
+	return
+}
+
 func newWaitCmd() (cmd *cobra.Command) {
 	opt := &waitOption{}
 	cmd = &cobra.Command{
