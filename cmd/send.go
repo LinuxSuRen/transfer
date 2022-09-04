@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"bufio"
@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func newSendCmd() (cmd *cobra.Command) {
+func NewSendCmd() (cmd *cobra.Command) {
 	opt := &sendOption{}
 
 	cmd = &cobra.Command{

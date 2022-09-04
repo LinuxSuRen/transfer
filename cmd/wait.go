@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"context"
@@ -182,7 +182,7 @@ func requestDone(conn *net.UDPConn, remote *net.UDPAddr) (err error) {
 	return
 }
 
-func newWaitCmd() (cmd *cobra.Command) {
+func NewWaitCmd() (cmd *cobra.Command) {
 	opt := &waitOption{}
 	cmd = &cobra.Command{
 		Use:     "wait",

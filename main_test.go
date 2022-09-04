@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/linuxsuren/transfer/cmd"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -99,7 +100,7 @@ func TestCheckMissing(t *testing.T) {
 	}}
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			index, ok := checkMissing(tt.message)
+			index, ok := cmd.checkMissing(tt.message)
 			assert.Equal(t, tt.wantIndex, index, "failed in case [%d]", i)
 			assert.Equal(t, tt.wantOK, ok, "failed in case [%d]", i)
 		})
