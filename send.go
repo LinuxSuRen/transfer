@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -98,7 +100,7 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 			return
 		}
 
-		err = retry(10, func() error {
+		err = retry(30, func() error {
 			// no buffer space available might happen on darwin
 			_, err := conn.Write(builder.CreateHeader(i, buf[:n]))
 			return err
@@ -111,47 +113,54 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 	}
 	cmd.Println("all the data was sent, try to wait for the missing data")
 
-	checking := true
-	go func(checking *bool) {
+	mapBuffer := NewSafeMap(0)
+	ck := atomic.Bool{}
+	ck.Store(true)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		cmd.Print("checking")
-		for *checking {
-			select {
-			case <-time.After(time.Second * 5):
-				cmd.Print(".")
+
+		for index := mapBuffer.GetLowestAndRemove(); ck.Load(); index = mapBuffer.GetLowestAndRemove() {
+			if index != nil {
+				//fmt.Println("send", *index)
+				_ = send(f, reader, conn, *index, chunk, builder)
+			} else {
+				fmt.Print(".")
+				time.Sleep(time.Second * 3)
 			}
 		}
-		cmd.Println()
-	}(&checking)
+		fmt.Println()
+	}()
 
-	for checking {
+	for ck.Load() {
 		var index int
 		var ok bool
 		if index, ok, err = waitingMissing(conn); ok {
 			if index == -1 {
-				checking = false
+				ck.Store(false)
 			} else {
-				if err = send(f, reader, conn, index, chunk, builder); err != nil {
-					return err
-				}
+				//fmt.Println("got missing", index)
+				mapBuffer.Put(index, "")
 			}
 		} else if err != nil {
+			fmt.Println(err)
 			if match, _ := regexp.MatchString(".*connection refused.*", err.Error()); match {
-				if conn, err = net.Dial("udp", fmt.Sprintf("%s:%d", o.ip, o.port)); err != nil {
-					return
-				}
-			} else if match, _ := regexp.MatchString(".*i/o timeout.*", err.Error()); match {
-				if conn, err = net.Dial("udp", fmt.Sprintf("%s:%d", o.ip, o.port)); err != nil {
-					return
-				}
-			}
+				time.Sleep(time.Second * 2)
 
-			time.Sleep(time.Second * 2)
-			if err = send(f, reader, conn, 0, chunk, builder); err != nil {
-				return err
+				if conn, err = net.Dial("udp", fmt.Sprintf("%s:%d", o.ip, o.port)); err != nil {
+					fmt.Println(err)
+					return
+				}
+				if err = send(f, reader, conn, 0, chunk, builder); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
+	wg.Wait()
 	endTime := time.Now()
 	cmd.Println("sent over with", endTime.Sub(beginTime).Seconds())
 	return
@@ -168,7 +177,7 @@ func send(f *os.File, reader *bufio.Reader, conn net.Conn, index, chunk int, bui
 		return
 	}
 
-	_ = retry(10, func() error {
+	err = retry(30, func() error {
 		_, err := conn.Write(builder.CreateHeader(index, buf[:n]))
 		return err
 	})
@@ -182,9 +191,9 @@ func waitingMissing(conn net.Conn) (index int, ok bool, err error) {
 	message := make([]byte, 14)
 
 	var rlen int
-	if err = conn.SetReadDeadline(time.Now().Add(time.Second * 3)); err != nil {
-		return
-	}
+	//if err = conn.SetReadDeadline(time.Now().Add(time.Second * 3)); err != nil {
+	//	return
+	//}
 
 	if rlen, err = conn.Read(message[:]); err == nil && rlen == 14 {
 		index, ok = checkMissing(message)

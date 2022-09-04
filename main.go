@@ -27,7 +27,7 @@ func retry(count int, callback func() error) (err error) {
 			break
 		}
 		// mainly do this on the darwin
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 	return
 }

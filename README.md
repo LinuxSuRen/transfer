@@ -1,7 +1,10 @@
-Data transfer via UDP protocal.
+[![codecov](https://codecov.io/gh/LinuxSuRen/transfer/branch/master/graph/badge.svg?token=XS8g2CjdNL)](https://codecov.io/gh/LinuxSuRen/transfer)
+
+Data transfer via UDP protocol.
 
 ## Features
 * Send files to an unknown target IP address in a local network
+* Average speed: 13 MB/s
 
 ## Install
 Using [hd](https://github.com/LinuxSuRen/http-downloader/) to install it:
@@ -22,4 +25,4 @@ transfer send targetFile [ip]
 ```
 
 ## Limitations
-* Not stable when sending data from MacOS
+* Not fast enough (6.45 MB/s) when sending data from macOS

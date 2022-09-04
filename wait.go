@@ -70,10 +70,12 @@ func broadcast(ctx context.Context, ip net.IP) {
 }
 
 func (o *waitOption) runE(cmd *cobra.Command, args []string) error {
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{
+	udpAddress := &net.UDPAddr{
 		Port: o.port,
 		IP:   net.ParseIP(o.listen),
-	})
+	}
+
+	conn, err := net.ListenUDP("udp", udpAddress)
 	if err != nil {
 		return err
 	}
@@ -94,72 +96,81 @@ func (o *waitOption) runE(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		_ = f.Close()
+	}()
 
 	if _, err = f.Write(make([]byte, header.length)); err != nil {
 		err = fmt.Errorf("failed to init file, %v", err)
 		return err
 	}
 
-	buffer := make([]byte, header.count)
-	buffer[header.index] = 1
-	f.WriteAt(header.data, int64(header.chrunk*header.index))
+	mapBuffer := NewSafeMap(header.count)
+	go func() {
+		if _, err := f.WriteAt(header.data, int64(header.chrunk*header.index)); err == nil {
+			mapBuffer.Remove(header.index)
+		}
+	}()
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 
-		checking := true
-		for checking {
-			done := true
-			for i := 0; i < header.count; i++ {
-				if buffer[i] != 1 {
-					done = false
-
-					header, err := readHeader(conn)
+		//startedMissingThread := false
+		for size := mapBuffer.Size(); size > 0; size = mapBuffer.Size() {
+			header, err = readHeader(conn)
+			if err == nil {
+				go func(header dataHeader) {
+					_, err = f.WriteAt(header.data, int64(header.chrunk*header.index))
 					if err == nil {
-						_, err = f.WriteAt(header.data, int64(header.chrunk*header.index))
-						if err == nil {
-							buffer[header.index] = 1
-						}
+						mapBuffer.Remove(header.index)
+					} else {
+						fmt.Println(err)
 					}
-				}
-			}
-			if done {
-				checking = false
+				}(header)
 			}
 		}
 	}()
 
+	// check the buffer and start the missing thread
+	lastCount := 0
+	time.Sleep(time.Microsecond * time.Duration(lastCount) * 50)
+	for lastCount != mapBuffer.Size() {
+		lastCount = mapBuffer.Size()
+		time.Sleep(time.Second * 5)
+	}
+	sendWaitingMissingRequest(&wg, &header, mapBuffer, conn)
+
+	wg.Wait()
+	cmd.Println("wrote to file", f.Name())
+	return nil
+}
+
+func sendWaitingMissingRequest(wg *sync.WaitGroup, header *dataHeader, buffer *SafeMap, conn *net.UDPConn) {
 	wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer func() {
+			_ = conn.Close()
+			wg.Done()
+		}()
 
-		checking := true
-		for checking {
-			done := true
-			for i := 0; i < header.count; i++ {
-				if buffer[i] != 1 {
-					done = false
-					requestMissing(conn, i, header.remote)
-					time.Sleep(time.Millisecond * 10)
-					break
+		for buffer.Size() > 0 {
+			missing := buffer.GetKeys()
+			//fmt.Println("missing", len(missing))
+			for _, i := range missing {
+				err := requestMissing(conn, i, header.remote)
+				if err != nil {
+					fmt.Println(err)
 				}
 			}
+			time.Sleep(time.Second)
+		}
 
-			if done {
-				requestDone(conn, header.remote)
-				checking = false
-			}
+		for err := requestDone(conn, header.remote); err != nil; {
 		}
 		fmt.Println("done with checking")
 	}()
-
-	wg.Wait()
-	f.Close()
-
-	cmd.Println("wrote to file", f.Name())
-	return nil
 }
 
 func requestDone(conn *net.UDPConn, remote *net.UDPAddr) (err error) {

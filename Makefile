@@ -10,4 +10,4 @@ build-linux:
 build-all: build-darwin build-linux build-win
 
 test:
-	go test ./...
+	go test ./... -coverprofile coverage.out
