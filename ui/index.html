@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Title</title>
+    <title>Data transfer</title>
     <script type="application/javascript">
         function wait(){
             astilectron.sendMessage('{"cmd":"wait"}', function(message) {
@@ -13,16 +13,50 @@
             file = document.getElementById("file")
             path = file.files[0].path
             path = path.replace(/\\/g, '\\\\')
-            astilectron.sendMessage('{"cmd":"send","message":"' + path + '"}', function(message) {
+
+            var rates = document.getElementsByName('ip');
+            var ip;
+            for(var i = 0; i < rates.length; i++){
+                if(rates[i].checked){
+                    ip = rates[i].value;
+                }
+            }
+
+            astilectron.sendMessage('{"cmd":"send","message":"' + path + '","ip":"'+ip+'"}', function(message) {
                 console.log("received " + message)
             });
         }
+
+        // This will wait for the astilectron namespace to be ready
+        document.addEventListener('astilectron-ready', function() {
+            // This will listen to messages sent by GO
+            astilectron.onMessage(function(message) {
+                existing = document.getElementById(message)
+                if (existing) {
+                    return
+                }
+
+                target = document.createElement("input")
+                target.type="radio"
+                target.name="ip"
+                target.value=message
+                target.id=message
+
+                document.getElementById("waiters").append(target)
+                target = document.createElement("label")
+                target.htmlFor=message
+                target.innerText=message
+                document.getElementById("waiters").append(target)
+
+                target = document.createElement("br")
+                document.getElementById("waiters").append(target)
+            });
+        })
     </script>
 </head>
 <body>
-    Hello World!
-
     <button onclick="wait()">Wait</button>
+    <div id="waiters"></div>
 
     Choose: <input type="file" id="file">
     <button onclick="send()">Send</button>

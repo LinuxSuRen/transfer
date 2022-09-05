@@ -1,4 +1,4 @@
-package cmd
+package pkg
 
 import (
 	"fmt"
@@ -6,7 +6,8 @@ import (
 	"time"
 )
 
-func retry(count int, callback func() error) (err error) {
+// Retry run the callback for the specific times
+func Retry(count int, callback func() error) (err error) {
 	if callback == nil {
 		return
 	}

@@ -1,4 +1,4 @@
-package cmd
+package pkg
 
 import (
 	"fmt"
@@ -50,7 +50,7 @@ func readHeader(conn *net.UDPConn) (header dataHeader, err error) {
 	return
 }
 
-type headerBuilder struct {
+type HeaderBuilder struct {
 	file string
 
 	filename    string
@@ -59,14 +59,14 @@ type headerBuilder struct {
 	bufferCount int
 }
 
-// NewHeaderBuilder creates an instance of the headerBuilder
-func NewHeaderBuilder(file string) *headerBuilder {
-	return &headerBuilder{
+// NewHeaderBuilder creates an instance of the HeaderBuilder
+func NewHeaderBuilder(file string) *HeaderBuilder {
+	return &HeaderBuilder{
 		file: file,
 	}
 }
 
-func (h *headerBuilder) Build() (err error) {
+func (h *HeaderBuilder) Build() (err error) {
 	var fi os.FileInfo
 	if fi, err = os.Stat(h.file); err != nil {
 		return
@@ -98,7 +98,7 @@ func (h *headerBuilder) Build() (err error) {
 }
 
 // CreateHeader creates the header with index
-func (h *headerBuilder) CreateHeader(index int, data []byte) []byte {
+func (h *HeaderBuilder) CreateHeader(index int, data []byte) []byte {
 	// length,filename,count,index
 	header := fmt.Sprintf("%s%s%s%s%s",
 		fillContainerWithNumber(int(h.GetFileSize()), 20),
@@ -110,21 +110,21 @@ func (h *headerBuilder) CreateHeader(index int, data []byte) []byte {
 }
 
 // GetChunk returns the chunk size
-func (h *headerBuilder) GetChunk() int {
+func (h *HeaderBuilder) GetChunk() int {
 	return h.chunk
 }
 
 // GetBufferCount returns the buffer count
-func (h *headerBuilder) GetBufferCount() int {
+func (h *HeaderBuilder) GetBufferCount() int {
 	return h.bufferCount
 }
 
 // GetFileSize returns the file size
-func (h *headerBuilder) GetFileSize() int64 {
+func (h *HeaderBuilder) GetFileSize() int64 {
 	return h.fileSize
 }
 
 // GetFilename returns the file name
-func (h *headerBuilder) GetFilename() string {
+func (h *HeaderBuilder) GetFilename() string {
 	return h.filename
 }
