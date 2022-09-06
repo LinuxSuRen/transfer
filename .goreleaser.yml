@@ -3,48 +3,59 @@ project_name: transfer
 builds:
   - env:
       - CGO_ENABLED=0
+    id: "cli"
     binary: transfer
-    goarch:
-      - amd64
-      - arm64
-      - arm
-    goarm:
-      - 7
-      - 6
     goos:
       - windows
       - linux
       - darwin
-    ignore:
-      - goos: windows
-        goarch: arm
-      - goos: windows
-        goarch: arm64
-      - goos: darwin
-        goarch: arm
-    hooks:
-      post:
-        - upx "{{ .Path }}"
     ldflags:
       - -X github.com/linuxsuren/cobra-extension/version.version={{.Version}}
       - -X github.com/linuxsuren/cobra-extension/version.commit={{.ShortCommit}}
       - -X github.com/linuxsuren/cobra-extension/version.date={{.Date}}
       - -w
       - -s
+  - env:
+      - CGO_ENABLED=0
+    id: "gui"
+    binary: transfer-gui
+    main: ./ui/main.go
+    goos:
+      - windows
+      - linux
+      - darwin
+    ldflags:
+      - -X github.com/linuxsuren/cobra-extension/version.version={{.Version}}
+      - -X github.com/linuxsuren/cobra-extension/version.commit={{.ShortCommit}}
+      - -X github.com/linuxsuren/cobra-extension/version.date={{.Date}}
+      - -w
 dist: release
 archives:
-  - name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}{{ .Arm }}"
+  - name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}"
+    id: "cli"
+    builds:
+      - "cli"
     replacements:
       darwin: darwin
       linux: linux
       windows: windows
-      amd64: amd64
-      arm64: arm64
     format_overrides:
       - goos: windows
         format: zip
     files:
       - README.md
+      - LICENSE
+  - name_template: "transfer-gui-{{ .Os }}-{{ .Arch }}"
+    id: "gui"
+    builds:
+      - "gui"
+    replacements:
+      darwin: darwin
+      linux: linux
+      amd64: amd64
+    files:
+      - README.md
+      - LICENSE
 checksum:
   name_template: 'checksums.txt'
 snapshot:

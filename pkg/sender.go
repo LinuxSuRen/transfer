@@ -1,9 +1,9 @@
-package main
+package pkg
 
 import (
 	"bufio"
+	"context"
 	"fmt"
-	"github.com/spf13/cobra"
 	"io"
 	"net"
 	"os"
@@ -15,54 +15,25 @@ import (
 	"time"
 )
 
-func newSendCmd() (cmd *cobra.Command) {
-	opt := &sendOption{}
-
-	cmd = &cobra.Command{
-		Use:     "send",
-		Short:   "Send data with UDP protocol",
-		PreRunE: opt.preRunE,
-		RunE:    opt.runE,
-	}
-	flags := cmd.Flags()
-	flags.IntVarP(&opt.port, "port", "p", 3000, "The port to send")
-	return
-}
-
-type sendOption struct {
+type UDPSender struct {
 	ip   string
 	port int
 }
 
-func (o *sendOption) preRunE(cmd *cobra.Command, args []string) (err error) {
-	if len(args) >= 2 {
-		o.ip = args[1]
-		return
+func NewUDPSender(ip string) *UDPSender {
+	return &UDPSender{
+		ip:   ip,
+		port: 3000,
 	}
-
-	cmd.Println("no target ip provided, trying to find it")
-	listener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 9981})
-	if err != nil {
-		return err
-	}
-	data := make([]byte, 1024)
-	_, remoteAddr, err := listener.ReadFromUDP(data)
-	if err != nil {
-		return err
-	}
-	o.ip = remoteAddr.IP.String()
-	cmd.Println("found target", o.ip)
-	return
 }
 
-func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
-	beginTime := time.Now()
-	if len(args) <= 0 {
-		cmd.PrintErrln("filename is required")
-		return
-	}
+func (s *UDPSender) WithPort(port int) *UDPSender {
+	s.port = port
+	return s
+}
 
-	file := args[0]
+func (s *UDPSender) Send(msg chan string, file string) (err error) {
+	defer close(msg)
 
 	var f *os.File
 	if f, err = os.Open(file); err != nil {
@@ -77,19 +48,19 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 	chunk := builder.GetChunk()
 	fileSize := builder.GetFileSize()
 
-	cmd.Println("sending chunk size", chunk)
-	cmd.Println("file length", fileSize)
-	cmd.Println("connect to", o.ip)
+	msg <- fmt.Sprintf("sending chunk size %d", chunk)
+	msg <- fmt.Sprintf("file length %d", fileSize)
+	msg <- fmt.Sprintf("connect to %s", s.ip)
 
 	var conn net.Conn
-	if conn, err = net.Dial("udp", fmt.Sprintf("%s:%d", o.ip, o.port)); err != nil {
+	if conn, err = net.Dial("udp", fmt.Sprintf("%s:%d", s.ip, s.port)); err != nil {
 		return
 	}
 	defer func() {
 		_ = conn.Close()
 	}()
 
-	cmd.Println("start to send data")
+	msg <- "start to send data"
 	reader := bufio.NewReader(f)
 	for i := 0; i < builder.GetBufferCount(); i++ {
 		buf := make([]byte, builder.GetChunk())
@@ -100,7 +71,7 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 			return
 		}
 
-		err = retry(30, func() error {
+		err = Retry(30, func() error {
 			// no buffer space available might happen on darwin
 			_, err := conn.Write(builder.CreateHeader(i, buf[:n]))
 			return err
@@ -111,7 +82,7 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 			time.Sleep(time.Second)
 		}
 	}
-	cmd.Println("all the data was sent, try to wait for the missing data")
+	msg <- "all the data was sent, try to wait for the missing data"
 
 	mapBuffer := NewSafeMap(0)
 	ck := atomic.Bool{}
@@ -120,7 +91,7 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		cmd.Print("checking")
+		msg <- "checking"
 
 		for index := mapBuffer.GetLowestAndRemove(); ck.Load(); index = mapBuffer.GetLowestAndRemove() {
 			if index != nil {
@@ -149,7 +120,7 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 			if match, _ := regexp.MatchString(".*connection refused.*", err.Error()); match {
 				time.Sleep(time.Second * 2)
 
-				if conn, err = net.Dial("udp", fmt.Sprintf("%s:%d", o.ip, o.port)); err != nil {
+				if conn, err = net.Dial("udp", fmt.Sprintf("%s:%d", s.ip, s.port)); err != nil {
 					fmt.Println(err)
 					return
 				}
@@ -161,12 +132,10 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 	}
 
 	wg.Wait()
-	endTime := time.Now()
-	cmd.Println("sent over with", endTime.Sub(beginTime).Seconds())
 	return
 }
 
-func send(f *os.File, reader *bufio.Reader, conn net.Conn, index, chunk int, builder *headerBuilder) (err error) {
+func send(f *os.File, reader *bufio.Reader, conn net.Conn, index, chunk int, builder *HeaderBuilder) (err error) {
 	if _, err = f.Seek(int64(index*chunk), 0); err != nil {
 		return
 	}
@@ -177,7 +146,7 @@ func send(f *os.File, reader *bufio.Reader, conn net.Conn, index, chunk int, bui
 		return
 	}
 
-	err = retry(30, func() error {
+	err = Retry(30, func() error {
 		_, err := conn.Write(builder.CreateHeader(index, buf[:n]))
 		return err
 	})
@@ -216,7 +185,30 @@ func checkMissing(message []byte) (index int, ok bool) {
 	return
 }
 
-func requestMissing(conn *net.UDPConn, index int, remote *net.UDPAddr) (err error) {
-	_, err = conn.WriteTo([]byte("miss"+fillContainerWithNumber(index, 10)), remote)
-	return
+func FindWaiters(ctx context.Context, waiter chan string) {
+	go func() {
+		for {
+			var listener *net.UDPConn
+			var err error
+
+			select {
+			case <-ctx.Done():
+				if listener != nil {
+					_ = listener.Close()
+				}
+				return
+			default:
+				listener, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 9981})
+				if err != nil {
+					continue
+				}
+
+				data := make([]byte, 1024)
+				_, remoteAddr, err := listener.ReadFromUDP(data)
+				if err == nil {
+					waiter <- remoteAddr.IP.String()
+				}
+			}
+		}
+	}()
 }
