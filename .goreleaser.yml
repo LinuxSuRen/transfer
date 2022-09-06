@@ -52,7 +52,10 @@ archives:
     replacements:
       darwin: darwin
       linux: linux
-      amd64: amd64
+      windows: windows
+    format_overrides:
+      - goos: windows
+        format: zip
     files:
       - README.md
       - LICENSE
