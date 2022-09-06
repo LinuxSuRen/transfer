@@ -13,5 +13,8 @@ build-gui:
 	CGO_ENABLE=0 GOOS=windows go build -ldflags -H=windowsgui -o bin/win/transfer-gui.exe ui/main.go
 	CGO_ENABLE=0 GOOS=windows go build -o bin/win/transfer-gui.exe ui/main.go
 
+goreleaser:
+	goreleaser build --rm-dist --snapshot
+
 test:
 	go test ./... -coverprofile coverage.out

@@ -31,6 +31,25 @@ builds:
       - -X github.com/linuxsuren/cobra-extension/version.date={{.Date}}
       - -w
       - -s
+  - env:
+      - CGO_ENABLED=0
+    id: "gui"
+    binary: transfer-gui
+    main: ./ui/main.go
+    goarch:
+      - amd64
+    goos:
+      - windows
+      - linux
+      - darwin
+    hooks:
+      post:
+        - upx "{{ .Path }}"
+    ldflags:
+      - -X github.com/linuxsuren/cobra-extension/version.version={{.Version}}
+      - -X github.com/linuxsuren/cobra-extension/version.commit={{.ShortCommit}}
+      - -X github.com/linuxsuren/cobra-extension/version.date={{.Date}}
+      - -w
 dist: release
 archives:
   - name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}{{ .Arm }}"
