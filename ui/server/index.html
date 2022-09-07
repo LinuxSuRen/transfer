@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Data transfer</title>
+    <style>
+        #file {
+            width: 350px;
+            height: 70px;
+            padding: 10px;
+            border: 1px solid #aaaaaa;
+        }
+    </style>
+    <script type="application/javascript">
+        function waitHandle(e){
+            if (e.checked) {
+                astilectron.sendMessage('{"cmd":"wait"}', function(message) {
+                    console.log("received " + message)
+                });
+            } else {
+                astilectron.sendMessage('{"cmd":"stopWait"}', function(message) {
+                    console.log("received " + message)
+                });
+            }
+        }
+        function send(){
+            file = document.getElementById("file")
+            if (file.innerText===""){
+                alert("file is required")
+                return
+            }
+            path = file.innerText
+
+            let rates = document.getElementsByName('ip');
+            ip = ""
+            for(var i = 0; i < rates.length; i++){
+                if(rates[i].checked){
+                    ip = rates[i].value;
+                }
+            }
+
+            if (ip===""){
+                alert("server is required")
+            } else {
+                astilectron.sendMessage('{"cmd":"send","message":"' + path + '","ip":"'+ip+'"}', function(message) {
+                    console.log("received " + message)
+                });
+            }
+        }
+
+        // This will wait for the astilectron namespace to be ready
+        document.addEventListener('astilectron-ready', function() {
+            // This will listen to messages sent by GO
+            astilectron.onMessage(function(data) {
+                const key = data["key"]
+                const value = data["value"]
+                switch (key) {
+                    case "ip":
+                        addWaiter(value)
+                        break
+                    case "log":
+                        appendLogoutput(value)
+                        break
+                }
+            });
+        })
+
+        function appendLogoutput(log){
+            let oldLog = document.getElementById("log-output").value
+            document.getElementById("log-output").value = oldLog + log
+
+            document.getElementById("log-output").scrollTop = document.getElementById("log-output").scrollHeight
+        }
+
+        function addWaiter(ip) {
+            existing = document.getElementById(ip)
+            if (existing) {
+                return
+            }
+
+            target = document.createElement("input")
+            target.type="radio"
+            target.name="ip"
+            target.value=ip
+            target.id=ip
+
+            document.getElementById("waiters").append(target)
+            target = document.createElement("label")
+            target.htmlFor=ip
+            target.innerText=ip
+            document.getElementById("waiters").append(target)
+
+            target = document.createElement("br")
+            document.getElementById("waiters").append(target)
+        }
+
+        function allowDrop(ev) {
+            ev.preventDefault();
+        }
+
+        function drag(ev) {
+            ev.dataTransfer.setData("text", ev.target.id);
+        }
+
+        function drop(ev) {
+            ev.preventDefault();
+            // var data = ev.dataTransfer.getData("text");
+            // ev.target.appendChild(document.getElementById(data));
+
+            if (ev.dataTransfer.items) {
+                // Use DataTransferItemList interface to access the file(s)
+                [...ev.dataTransfer.items].forEach((item, i) => {
+                    // If dropped items aren't files, reject them
+                    if (item.kind === 'file') {
+                        const file = item.getAsFile();
+                        const path = file.path.replace(/\\/g, '\\\\')
+                        document.getElementById("file").innerText=path
+                    }
+                });
+            } else {
+                // Use DataTransfer interface to access the file(s)
+                [...ev.dataTransfer.files].forEach((file, i) => {
+                    const path = file.path.replace(/\\/g, '\\\\')
+                    document.getElementById("file").innerText=path
+                });
+            }
+        }
+    </script>
+</head>
+<body>
+    <label for="wait">Wait for the files</label><input type="checkbox" id="wait" onclick="waitHandle(this)"/>
+    <hr>
+    <div>Select target server:</div>
+    <div id="waiters"></div>
+
+    Drag file to the following area:<button onclick="send()">Send</button>
+    <div id="file" ondrop="drop(event)" ondragover="allowDrop(event)" style="background: aquamarine"></div>
+    <label for="log-output">Log Output:</label><br/>
+    <textarea readonly id="log-output" style="width: 100%;" rows="10"></textarea>
+</body>
+</html>

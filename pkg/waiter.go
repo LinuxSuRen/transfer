@@ -44,12 +44,12 @@ func (w *UDPWaiter) Start(msg chan string) (err error) {
 		_ = conn.Close()
 	}()
 
-	msg <- fmt.Sprintf("server listening %s", conn.LocalAddr().String())
+	msg <- fmt.Sprintf("server listening %s\n", conn.LocalAddr().String())
 	header, err := readHeader(conn)
 	if err != nil {
 		return err
 	}
-	msg <- fmt.Sprintf("start to receive data from %v", header.remote)
+	msg <- fmt.Sprintf("start to receive data from %v\n", header.remote)
 
 	f, err := os.OpenFile(header.filename, os.O_WRONLY|os.O_CREATE, 0640)
 	if err != nil {
@@ -97,14 +97,14 @@ func (w *UDPWaiter) Start(msg chan string) (err error) {
 		lastCount = mapBuffer.Size()
 		time.Sleep(time.Second * 5)
 	}
-	sendWaitingMissingRequest(&wg, &header, mapBuffer, conn)
+	sendWaitingMissingRequest(&wg, &header, mapBuffer, conn, msg)
 
 	wg.Wait()
-	msg <- fmt.Sprintf("wrote to file %s", f.Name())
+	msg <- fmt.Sprintf("wrote to file %s\n", f.Name())
 	return
 }
 
-func sendWaitingMissingRequest(wg *sync.WaitGroup, header *dataHeader, buffer *SafeMap, conn *net.UDPConn) {
+func sendWaitingMissingRequest(wg *sync.WaitGroup, header *dataHeader, buffer *SafeMap, conn *net.UDPConn, msg chan string) {
 	wg.Add(1)
 	go func() {
 		defer func() {
@@ -123,7 +123,7 @@ func sendWaitingMissingRequest(wg *sync.WaitGroup, header *dataHeader, buffer *S
 
 		for err := requestDone(conn, header.remote); err != nil; {
 		}
-		fmt.Println("done with checking")
+		msg <- "done with checking\n"
 	}()
 }
 

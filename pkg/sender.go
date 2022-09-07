@@ -18,12 +18,16 @@ import (
 type UDPSender struct {
 	ip   string
 	port int
+
+	beginTime time.Time
+	endTime   time.Time
 }
 
 func NewUDPSender(ip string) *UDPSender {
 	return &UDPSender{
-		ip:   ip,
-		port: 3000,
+		ip:        ip,
+		port:      3000,
+		beginTime: time.Now(),
 	}
 }
 
@@ -48,9 +52,9 @@ func (s *UDPSender) Send(msg chan string, file string) (err error) {
 	chunk := builder.GetChunk()
 	fileSize := builder.GetFileSize()
 
-	msg <- fmt.Sprintf("sending chunk size %d", chunk)
-	msg <- fmt.Sprintf("file length %d", fileSize)
-	msg <- fmt.Sprintf("connect to %s", s.ip)
+	msg <- fmt.Sprintf("sending chunk size %d\n", chunk)
+	msg <- fmt.Sprintf("file length %d\n", fileSize)
+	msg <- fmt.Sprintf("connect to %s\n", s.ip)
 
 	var conn net.Conn
 	if conn, err = net.Dial("udp", fmt.Sprintf("%s:%d", s.ip, s.port)); err != nil {
@@ -60,7 +64,7 @@ func (s *UDPSender) Send(msg chan string, file string) (err error) {
 		_ = conn.Close()
 	}()
 
-	msg <- "start to send data"
+	msg <- "start to send data\n"
 	reader := bufio.NewReader(f)
 	for i := 0; i < builder.GetBufferCount(); i++ {
 		buf := make([]byte, builder.GetChunk())
@@ -82,7 +86,7 @@ func (s *UDPSender) Send(msg chan string, file string) (err error) {
 			time.Sleep(time.Second)
 		}
 	}
-	msg <- "all the data was sent, try to wait for the missing data"
+	msg <- "all the data was sent, try to wait for the missing data\n"
 
 	mapBuffer := NewSafeMap(0)
 	ck := atomic.Bool{}
@@ -95,14 +99,13 @@ func (s *UDPSender) Send(msg chan string, file string) (err error) {
 
 		for index := mapBuffer.GetLowestAndRemove(); ck.Load(); index = mapBuffer.GetLowestAndRemove() {
 			if index != nil {
-				//fmt.Println("send", *index)
 				_ = send(f, reader, conn, *index, chunk, builder)
 			} else {
-				fmt.Print(".")
+				msg <- "."
 				time.Sleep(time.Second * 3)
 			}
 		}
-		fmt.Println()
+		msg <- "\n"
 	}()
 
 	for ck.Load() {
@@ -116,7 +119,6 @@ func (s *UDPSender) Send(msg chan string, file string) (err error) {
 				mapBuffer.Put(index, "")
 			}
 		} else if err != nil {
-			fmt.Println(err)
 			if match, _ := regexp.MatchString(".*connection refused.*", err.Error()); match {
 				time.Sleep(time.Second * 2)
 
@@ -132,7 +134,14 @@ func (s *UDPSender) Send(msg chan string, file string) (err error) {
 	}
 
 	wg.Wait()
+	s.endTime = time.Now()
+	msg <- "end"
 	return
+}
+
+// ConsumedTime returns the consumed time
+func (s *UDPSender) ConsumedTime() time.Duration {
+	return s.endTime.Sub(s.beginTime)
 }
 
 func send(f *os.File, reader *bufio.Reader, conn net.Conn, index, chunk int, builder *HeaderBuilder) (err error) {
