@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/linuxsuren/transfer/pkg"
 	"github.com/spf13/cobra"
-	"time"
 )
 
 func NewSendCmd() (cmd *cobra.Command) {
@@ -46,7 +45,6 @@ func (o *sendOption) preRunE(cmd *cobra.Command, args []string) (err error) {
 }
 
 func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
-	beginTime := time.Now()
 	if len(args) <= 0 {
 		cmd.PrintErrln("filename is required")
 		return
@@ -59,12 +57,14 @@ func (o *sendOption) runE(cmd *cobra.Command, args []string) (err error) {
 
 	go func() {
 		for a := range msg {
-			cmd.Println(a)
+			if a == "end" {
+				break
+			}
+			cmd.Print(a)
 		}
 	}()
 
 	err = sender.Send(msg, file)
-	endTime := time.Now()
-	fmt.Printf("sent over with %f\n", endTime.Sub(beginTime).Seconds())
+	fmt.Printf("sent over in %fs\n", sender.ConsumedTime().Seconds())
 	return
 }

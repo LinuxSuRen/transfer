@@ -8,23 +8,20 @@ import (
 	"github.com/asticode/go-astikit"
 	"github.com/asticode/go-astilectron"
 	"github.com/linuxsuren/transfer/pkg"
+	"github.com/linuxsuren/transfer/ui/server"
 	"log"
-	"net/http"
 )
-
-func startHTTPServer() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(indexHTML))
-	})
-	_ = http.ListenAndServe(":9999", nil)
-}
 
 func main() {
 	// Set logger
 	l := log.New(log.Writer(), log.Prefix(), log.Flags())
+	portChan := make(chan int, 1)
+	ctx, cancel := context.WithCancel(context.TODO())
 
 	go func() {
-		startHTTPServer()
+		if err := server.StartHTTPServer(ctx, portChan); err != nil {
+			fmt.Println(err)
+		}
 	}()
 
 	// Create astilectron
@@ -47,24 +44,22 @@ func main() {
 
 	// New window
 	var w *astilectron.Window
-	if w, err = a.NewWindow("http://localhost:9999", &astilectron.WindowOptions{
+	if w, err = a.NewWindow(fmt.Sprintf("http://localhost:%d", <-portChan), &astilectron.WindowOptions{
 		Center: astikit.BoolPtr(true),
-		Height: astikit.IntPtr(700),
+		Height: astikit.IntPtr(500),
 		Width:  astikit.IntPtr(700),
 	}); err != nil {
 		l.Fatal(fmt.Errorf("main: new window failed: %w", err))
 	}
 	//w.OpenDevTools()
 	w.OnMessage(func(m *astilectron.EventMessage) (v interface{}) {
-		fmt.Println("receive message")
 		var s string
-		err := m.Unmarshal(&s)
-		fmt.Println(err)
+		if err := m.Unmarshal(&s); err != nil {
+			return
+		}
 
-		fmt.Println(s)
 		data := make(map[string]string)
 		err = json.Unmarshal([]byte(s), &data)
-		fmt.Println(err)
 
 		switch data["cmd"] {
 		case "wait":
@@ -73,19 +68,12 @@ func main() {
 
 			go func() {
 				for m := range msg {
-					var n = a.NewNotification(&astilectron.NotificationOptions{
-						Body:             m,
-						HasReply:         astikit.BoolPtr(true),  // Only MacOSX
-						ReplyPlaceholder: "type your reply here", // Only MacOSX
-						Title:            "Msg",
-					})
-					// Create notification
-					n.Create()
-					// Show notification
-					n.Show()
+					_ = sendMsg("log", m, w)
 				}
 			}()
 			return waiter.Start(msg)
+		case "stopWait":
+			fmt.Println("not support stop wait")
 		case "send":
 			file := data["message"]
 			if file != "" {
@@ -94,27 +82,21 @@ func main() {
 
 				go func() {
 					for m := range msg {
-						var n = a.NewNotification(&astilectron.NotificationOptions{
-							Body:             m,
-							HasReply:         astikit.BoolPtr(true),  // Only MacOSX
-							ReplyPlaceholder: "type your reply here", // Only MacOSX
-							Title:            "Msg",
-						})
-						// Create notification
-						n.Create()
-						// Show notification
-						n.Show()
+						if m == "end" {
+							break
+						}
+						_ = sendMsg("log", m, w)
 					}
 				}()
 
 				err = sender.Send(msg, file)
+				_ = sendMsg("log", fmt.Sprintf("sent over in %fs\n", sender.ConsumedTime().Seconds()), w)
 			}
 		}
 		return
 	})
 	_ = pkg.Broadcast(context.TODO())
 
-	ctx, cancel := context.WithCancel(context.TODO())
 	w.On(astilectron.EventNameAppClose, func(e astilectron.Event) (deleteListener bool) {
 		cancel()
 		return
@@ -127,8 +109,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case ip := <-waiter:
-				_ = w.SendMessage(ip, func(m *astilectron.EventMessage) {
-				})
+				_ = sendMsg("ip", ip, w)
 			}
 		}
 	}()
@@ -142,5 +123,9 @@ func main() {
 	a.Wait()
 }
 
-//go:embed index.html
-var indexHTML string
+func sendMsg(key, value string, w *astilectron.Window) error {
+	return w.SendMessage(map[string]string{
+		"key":   key,
+		"value": value,
+	})
+}
