@@ -9,6 +9,9 @@ builds:
       - windows
       - linux
       - darwin
+    ignore:
+      - goarch: 386
+      - goarch: arm64
     ldflags:
       - -X github.com/linuxsuren/cobra-extension/version.version={{.Version}}
       - -X github.com/linuxsuren/cobra-extension/version.commit={{.ShortCommit}}
@@ -17,29 +20,32 @@ builds:
       - -s
   - env:
       - CGO_ENABLED=0
-    id: "gui"
+    id: "transfer-gui"
     binary: transfer-gui
     main: ./ui/main.go
     goos:
       - windows
       - linux
       - darwin
+    ignore:
+      - goarch: 386
+      - goarch: arm64
     ldflags:
       - -X github.com/linuxsuren/cobra-extension/version.version={{.Version}}
       - -X github.com/linuxsuren/cobra-extension/version.commit={{.ShortCommit}}
       - -X github.com/linuxsuren/cobra-extension/version.date={{.Date}}
       - -w
-      - -H=windowsgui
+      - -s
+    overrides:
+      - goos: window
+        ldflags:
+          - -H=windowsgui
 dist: release
 archives:
   - name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}"
     id: "cli"
     builds:
       - "cli"
-    replacements:
-      darwin: darwin
-      linux: linux
-      windows: windows
     format_overrides:
       - goos: windows
         format: zip
@@ -47,13 +53,9 @@ archives:
       - README.md
       - LICENSE
   - name_template: "transfer-gui-{{ .Os }}-{{ .Arch }}"
-    id: "gui"
+    id: "transfer-gui"
     builds:
-      - "gui"
-    replacements:
-      darwin: darwin
-      linux: linux
-      windows: windows
+      - "transfer-gui"
     format_overrides:
       - goos: windows
         format: zip

@@ -25,4 +25,4 @@ transfer send targetFile [ip]
 ```
 
 ## Limitations
-* Not fast enough (6.45 MB/s) when sending data from macOS
+* Not fast enough (8.35 MB/s) when sending data from macOS
