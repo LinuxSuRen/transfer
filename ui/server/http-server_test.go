@@ -16,17 +16,16 @@ func Test_startHTTPServer(t *testing.T) {
 		err := StartHTTPServer(ctx, portChan)
 		assert.Nil(t, err)
 	}()
-	select {
-	case port := <-portChan:
-		resp, err := http.Get(fmt.Sprintf("http://localhost:%d", port))
-		assert.Nil(t, err)
 
-		var body []byte
-		body, err = io.ReadAll(resp.Body)
-		assert.Nil(t, err)
-		assert.Equal(t, indexHTML, string(body))
+	port := <-portChan
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d", port))
+	assert.Nil(t, err)
 
-		assert.NotEqual(t, 0, port)
-		cancel()
-	}
+	var body []byte
+	body, err = io.ReadAll(resp.Body)
+	assert.Nil(t, err)
+	assert.Equal(t, indexHTML, string(body))
+
+	assert.NotEqual(t, 0, port)
+	cancel()
 }

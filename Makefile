@@ -7,6 +7,11 @@ build-darwin:
 build-linux:
 	CGO_ENABLE=0 GOOS=linux go build -o bin/linux/transfer
 
+build:
+	CGO_ENABLE=0 go build -o bin/transfer
+copy: build
+	sudo cp bin/transfer /usr/local/bin
+
 build-all: build-darwin build-linux build-win
 
 build-gui:
@@ -18,3 +23,6 @@ goreleaser:
 
 test:
 	go test ./... -coverprofile coverage.out
+lint:
+	golangci-lint run ./...
+pre-commit: test lint
