@@ -12,13 +12,24 @@ import (
 type UDPWaiter struct {
 	port   int
 	listen string
+
+	receivedData chan ReceivedData
+	eof          chan interface{}
+}
+
+// ReceivedData is the data read from UDP
+type ReceivedData struct {
+	Data   []byte
+	Remote *net.UDPAddr
 }
 
 // NewUDPWaiter creates an instance of NewUDPWaiter
 func NewUDPWaiter(port int) *UDPWaiter {
 	return &UDPWaiter{
-		port:   port,
-		listen: "0.0.0.0",
+		port:         port,
+		listen:       "0.0.0.0",
+		receivedData: make(chan ReceivedData, 1024),
+		eof:          make(chan interface{}),
 	}
 }
 
@@ -78,14 +89,29 @@ func (w *UDPWaiter) Start(msg chan string) (err error) {
 
 		//startedMissingThread := false
 		for size := mapBuffer.Size(); size > 0; size = mapBuffer.Size() {
-			header, err := readHeader(conn)
-			if err == nil {
-				go func(header dataHeader) {
-					_, err = f.WriteAt(header.data, int64(header.chrunk*header.index))
-					if err == nil {
-						mapBuffer.Remove(header.index)
-					}
-				}(header)
+			message := make([]byte, 65507)
+			data := ReceivedData{}
+			var (
+				rlen    int
+				readErr error
+			)
+			if rlen, data.Remote, readErr = conn.ReadFromUDP(message[:]); readErr == nil {
+				data.Data = message[:rlen]
+				w.receivedData <- data
+			}
+		}
+		// notify all the data was received
+		w.eof <- nil
+	}()
+
+	// start a thread to write the data
+	go func() {
+		for {
+			select {
+			case <-w.eof:
+				return
+			case data := <-w.receivedData:
+				writeData(data, f, mapBuffer)
 			}
 		}
 	}()
@@ -102,6 +128,16 @@ func (w *UDPWaiter) Start(msg chan string) (err error) {
 	wg.Wait()
 	msg <- fmt.Sprintf("wrote to file %s\n", f.Name())
 	return
+}
+
+func writeData(data ReceivedData, f *os.File, mapBuffer *SafeMap) {
+	header, err := readHeaderFromData(data)
+	if err == nil {
+		_, err = f.WriteAt(header.data, int64(header.chrunk*header.index))
+		if err == nil {
+			mapBuffer.Remove(header.index)
+		}
+	}
 }
 
 func sendWaitingMissingRequest(wg *sync.WaitGroup, header *dataHeader, buffer *SafeMap, conn *net.UDPConn, msg chan string) {

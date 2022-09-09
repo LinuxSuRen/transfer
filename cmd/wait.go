@@ -21,7 +21,7 @@ func (o *waitOption) runE(cmd *cobra.Command, args []string) error {
 
 	go func() {
 		for a := range msg {
-			cmd.Println(a)
+			cmd.Print(a)
 		}
 	}()
 	return waiter.Start(msg)

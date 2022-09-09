@@ -4,7 +4,7 @@ Data transfer via UDP protocol.
 
 ## Features
 * Send files to an unknown target IP address in a local network
-* Average speed: 13 MB/s
+* Average speed is 15 MB/s in WiFi (802.11ac)
 
 ## Install
 Using [hd](https://github.com/LinuxSuRen/http-downloader/) to install it:

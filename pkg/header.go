@@ -21,33 +21,49 @@ type dataHeader struct {
 	remote *net.UDPAddr
 }
 
+func readHeaderFromData(data ReceivedData) (header dataHeader, err error) {
+	message := data.Data
+	rlen := len(message)
+	if rlen <= 150 {
+		err = fmt.Errorf("invalid header format, message length should bigger than 150, current is %d", rlen)
+		return
+	}
+
+	length := string(message[:20])
+	header.filename = strings.TrimSpace(string(message[20:120]))
+	chrunk := string(message[120:130])
+	count := string(message[130:140])
+	index := string(message[140:150])
+
+	if header.length, err = strconv.Atoi(strings.TrimSpace(length)); err != nil {
+		err = fmt.Errorf("invalid length: '%s'", string(message[:20]))
+		return
+	}
+	if header.chrunk, err = strconv.Atoi(strings.TrimSpace(chrunk)); err != nil {
+		err = fmt.Errorf("invalid chrunk: '%s'", string(message[120:130]))
+		return
+	}
+	if header.count, err = strconv.Atoi(strings.TrimSpace(count)); err != nil {
+		return
+	}
+	if header.index, err = strconv.Atoi(strings.TrimSpace(index)); err != nil {
+		return
+	}
+
+	header.remote = data.Remote
+	header.data = message[150:rlen]
+	return
+}
+
 func readHeader(conn *net.UDPConn) (header dataHeader, err error) {
 	message := make([]byte, 65507)
 	var rlen int
-	rlen, header.remote, err = conn.ReadFromUDP(message[:])
-	if err == nil {
-		if rlen <= 150 {
-			err = fmt.Errorf("invalid header format")
-			return
-		}
-
-		if header.length, err = strconv.Atoi(strings.TrimSpace(string(message[:20]))); err != nil {
-			return
-		}
-		header.filename = strings.TrimSpace(string(message[20:120]))
-		if header.chrunk, err = strconv.Atoi(strings.TrimSpace(string(message[120:130]))); err != nil {
-			return
-		}
-		if header.count, err = strconv.Atoi(strings.TrimSpace(string(message[130:140]))); err != nil {
-			return
-		}
-		if header.index, err = strconv.Atoi(strings.TrimSpace(string(message[140:150]))); err != nil {
-			return
-		}
-
-		header.data = message[150:rlen]
+	data := ReceivedData{}
+	if rlen, data.Remote, err = conn.ReadFromUDP(message[:]); err != nil {
+		return
 	}
-	return
+	data.Data = message[:rlen]
+	return readHeaderFromData(data)
 }
 
 type HeaderBuilder struct {

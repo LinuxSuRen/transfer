@@ -11,7 +11,7 @@ import (
 
 func main() {
 	s := make(chan os.Signal, 1)
-	signal.Notify(s, syscall.SIGKILL)
+	signal.Notify(s, syscall.SIGTERM)
 
 	ctx, cancel := context.WithCancel(context.TODO())
 

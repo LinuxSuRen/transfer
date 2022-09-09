@@ -194,6 +194,7 @@ func checkMissing(message []byte) (index int, ok bool) {
 	return
 }
 
+// FindWaiters finds the potential package waiters, and notify with a channel
 func FindWaiters(ctx context.Context, waiter chan string) {
 	go func() {
 		for {
